@@ -4,7 +4,7 @@ on:
   schedule:
     # Cada 5 minutos. Es el mínimo permitido por GitHub Actions.
     # En la práctica corre con delays de algunos minutos en horas pico.
-    - cron: '*/5 * * * *'
+    - cron: '*/15 * * * *'
   workflow_dispatch:  # permite disparar manualmente desde la UI
 
 permissions:
