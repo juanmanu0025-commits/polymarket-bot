@@ -1,0 +1,48 @@
+name: snapshot
+
+on:
+  schedule:
+    # Cada 5 minutos. Es el mínimo permitido por GitHub Actions.
+    # En la práctica corre con delays de algunos minutos en horas pico.
+    - cron: '*/5 * * * *'
+  workflow_dispatch:  # permite disparar manualmente desde la UI
+
+permissions:
+  contents: write  # necesario para que el job pushee snapshots al repo
+
+# Si una corrida tarda mucho, cancelamos la anterior. Evita queue infinita.
+concurrency:
+  group: snapshot
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4  # corte de seguridad: si tarda más de 4 min, mata el job
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: install deps
+        run: pip install requests
+
+      - name: run snapshot
+        run: python poly_weather_bot.py
+
+      - name: commit & push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add snapshots/
+          if git diff --staged --quiet; then
+            echo "nada para commitear"
+          else
+            git commit -m "snapshot $(date -u +%Y-%m-%dT%H:%MZ)"
+            # retry simple en caso de race condition con otro job
+            git pull --rebase || true
+            git push
+          fi
