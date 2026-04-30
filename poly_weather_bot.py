@@ -10,6 +10,7 @@ Diseñado para correr como scheduled job en GitHub Actions.
 """
 
 import json
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,13 +20,40 @@ import requests
 GAMMA_API = "https://gamma-api.polymarket.com/markets"
 CLOB_BOOK = "https://clob.polymarket.com/book"
 
-# Keywords para filtrar mercados de clima. Ajustar si aparecen falsos positivos.
-WEATHER_KEYWORDS = [
-    "rain", "snow", "temperature", "hurricane", "weather",
-    "storm", "tornado", "blizzard", "heat wave", "frost",
-    "cyclone", "typhoon", "flood", "drought", "wildfire",
-    "fahrenheit", "celsius", "precipitation",
+# Keywords con word boundaries (\b). Match estricto contra la PREGUNTA solamente.
+# Lista conservadora: preferimos perder algunos mercados de clima legítimos
+# antes que llenarnos de falsos positivos (deportes, política, etc).
+WEATHER_PATTERNS = [
+    r"\brain\b", r"\brainfall\b", r"\bsnow\b", r"\bsnowfall\b",
+    r"\btemperature\b", r"\btemperatures\b",
+    r"\bhurricane\b",       # singular — "Hurricanes" (plural) cae en el equipo NHL
+    r"\bweather\b",
+    r"\btornado\b", r"\btornadoes\b",
+    r"\bblizzard\b",
+    r"\bheat wave\b", r"\bheatwave\b",
+    r"\bfrost\b",
+    r"\btyphoon\b", r"\bcyclone\b",
+    r"\bflooding\b",        # "flood" suelto matchea "flooded market"
+    r"\bdrought\b",
+    r"\bwildfire\b", r"\bwildfires\b",
+    r"\bfahrenheit\b", r"\bcelsius\b",
+    r"\bprecipitation\b",
+    r"\bnoaa\b",            # NOAA aparece en mercados que resuelven por dato oficial
+    r"\bnws\b",             # National Weather Service
+    r"\baccuweather\b",
 ]
+
+# Excluir explícitamente mercados deportivos que disparan falso positivo.
+# Por ejemplo "Carolina Hurricanes" (equipo de NHL).
+EXCLUDE_PATTERNS = [
+    r"\bhurricanes\b",      # equipo NHL siempre va en plural
+    r"\bnhl\b", r"\bnba\b", r"\bnfl\b", r"\bmlb\b",
+    r"\bstanley cup\b",
+    r"\bsuper bowl\b",
+]
+
+WEATHER_RE = re.compile("|".join(WEATHER_PATTERNS), re.IGNORECASE)
+EXCLUDE_RE = re.compile("|".join(EXCLUDE_PATTERNS), re.IGNORECASE)
 
 OUT_DIR = Path("snapshots")
 TIMEOUT = 20
@@ -51,11 +79,13 @@ def loads_or(value, default):
 
 
 def is_weather_market(market):
-    text = " ".join([
-        market.get("question") or "",
-        market.get("description") or "",
-    ]).lower()
-    return any(kw in text for kw in WEATHER_KEYWORDS)
+    """Filtra estricto: solo question, con word boundaries y exclusiones."""
+    question = market.get("question") or ""
+    if not question:
+        return False
+    if EXCLUDE_RE.search(question):
+        return False
+    return bool(WEATHER_RE.search(question))
 
 
 def fetch_active_markets():
